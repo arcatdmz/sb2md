@@ -94,10 +94,16 @@ function convertLine(line: string, options: ConvertOptions): string {
 
   if (body.startsWith(">")) {
     const quote = body.slice(1).replace(/^[\t ]?/, "");
-    return formatInlineLine(`${indentMarkdown}> `, quote, options);
+    return formatQuoteLine(indentMarkdown, quote, options);
   }
 
   return formatInlineLine(indentMarkdown, body, options);
+}
+
+function formatQuoteLine(indentMarkdown: string, quote: string, options: ConvertOptions): string {
+  const prefix = `${indentMarkdown}> `;
+  if (quote.trim() === "") return `${prefix}&nbsp;`;
+  return formatInlineLine(prefix, quote, options);
 }
 
 function convertInline(text: string, options: ConvertOptions): string {

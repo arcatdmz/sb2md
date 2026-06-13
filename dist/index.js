@@ -86,9 +86,15 @@ function convertLine(line, options) {
     const indentMarkdown = indent.length > 0 ? `${"  ".repeat(indent.length)}- ` : "";
     if (body.startsWith(">")) {
         const quote = body.slice(1).replace(/^[\t ]?/, "");
-        return formatInlineLine(`${indentMarkdown}> `, quote, options);
+        return formatQuoteLine(indentMarkdown, quote, options);
     }
     return formatInlineLine(indentMarkdown, body, options);
+}
+function formatQuoteLine(indentMarkdown, quote, options) {
+    const prefix = `${indentMarkdown}> `;
+    if (quote.trim() === "")
+        return `${prefix}&nbsp;`;
+    return formatInlineLine(prefix, quote, options);
 }
 function convertInline(text, options) {
     return stripImageMarkers(convertInlineMarked(text, options));
