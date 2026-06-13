@@ -102,8 +102,8 @@ function convertLine(line: string, options: ConvertOptions): string {
 
 function formatQuoteLine(indentMarkdown: string, quote: string, options: ConvertOptions): string {
   const prefix = `${indentMarkdown}> `;
-  if (quote.trim() === "") return `${prefix}&nbsp;`;
-  return formatInlineLine(prefix, quote, options);
+  const line = quote.trim() === "" ? `${prefix}&nbsp;` : formatInlineLine(prefix, quote, options);
+  return line.split("\n").map((part) => `${part}<br>`).join("\n");
 }
 
 function convertInline(text: string, options: ConvertOptions): string {

@@ -92,9 +92,8 @@ function convertLine(line, options) {
 }
 function formatQuoteLine(indentMarkdown, quote, options) {
     const prefix = `${indentMarkdown}> `;
-    if (quote.trim() === "")
-        return `${prefix}&nbsp;`;
-    return formatInlineLine(prefix, quote, options);
+    const line = quote.trim() === "" ? `${prefix}&nbsp;` : formatInlineLine(prefix, quote, options);
+    return line.split("\n").map((part) => `${part}<br>`).join("\n");
 }
 function convertInline(text, options) {
     return stripImageMarkers(convertInlineMarked(text, options));

@@ -95,6 +95,7 @@ test("table block", () => {
 });
 
 test("block quote", () => {
-  assert.equal(sb2md("> hello [World]\n>"), "> hello [World](./World.md)\n> &nbsp;");
-  assert.equal(sb2md("  >"), "    - > &nbsp;");
+  assert.equal(sb2md("> hello [World]\n>"), "> hello [World](./World.md)<br>\n> &nbsp;<br>");
+  assert.equal(sb2md("  >"), "    - > &nbsp;<br>");
+  assert.equal(sb2md("> title\n> ============================"), "> title<br>\n> ============================<br>");
 });
