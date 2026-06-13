@@ -55,7 +55,21 @@ test("gyazo and direct images", () => {
 test("image mixed with text is split into block-like lines", () => {
   assert.equal(
     sb2md("before [https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2] after [https://example.com/out]"),
-    "before\n[![https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2/thumb/250](https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2/thumb/250)](https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2)\nafter [https://example.com/out](https://example.com/out)"
+    "before\n\n[![https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2/thumb/250](https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2/thumb/250)](https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2)\n\nafter [https://example.com/out](https://example.com/out)"
+  );
+});
+
+test("image-only lines are separated from adjacent paragraphs", () => {
+  assert.equal(
+    sb2md("before\n[https://example.com/a.png]\nafter"),
+    "before\n\n![https://example.com/a.png](https://example.com/a.png)\n\nafter"
+  );
+});
+
+test("separate image-only lines become separate image blocks", () => {
+  assert.equal(
+    sb2md("[https://example.com/a.png]\n[https://example.com/b.png]"),
+    "![https://example.com/a.png](https://example.com/a.png)\n\n![https://example.com/b.png](https://example.com/b.png)"
   );
 });
 

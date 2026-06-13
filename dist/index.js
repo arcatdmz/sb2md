@@ -28,10 +28,11 @@ function convert(source, options = {}) {
         blocks.push(convertLine(line, options));
         i += 1;
     }
-    return blocks
+    const markedMarkdown = blocks
         .join("\n")
         .replace(/^[\t ]+/gm, (indent) => indent.replace(/\t/g, "  "))
         .replace(/[ \t]+$/gm, "");
+    return finalizeMarkdown(markedMarkdown);
 }
 exports.sb2md = convert;
 function parseCodeBlock(lines, start) {
@@ -254,8 +255,8 @@ function formatInlineLine(prefix, body, options) {
         return prefix.trimEnd();
     const converted = convertInlineMarked(body, options);
     if (!converted.includes(imageStart))
-        return `${prefix}${stripImageMarkers(converted)}`.trimEnd();
-    const lines = splitImageRuns(converted).map((segment) => `${prefix}${stripImageMarkers(segment)}`.trimEnd());
+        return `${prefix}${converted}`.trimEnd();
+    const lines = splitImageRuns(converted).map((segment) => `${prefix}${segment}`.trimEnd());
     return lines.join("\n");
 }
 function splitImageRuns(marked) {
@@ -303,6 +304,36 @@ function markImage(markdown) {
 }
 function stripImageMarkers(markdown) {
     return markdown.replaceAll(imageStart, "").replaceAll(imageEnd, "");
+}
+function finalizeMarkdown(markedMarkdown) {
+    const lines = markedMarkdown.split("\n");
+    const out = [];
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i] ?? "";
+        const imageBlock = isImageOnlyMarkedLine(line);
+        if (imageBlock && out.length > 0 && out[out.length - 1] !== "") {
+            out.push("");
+        }
+        out.push(stripImageMarkers(line));
+        if (imageBlock && i < lines.length - 1 && lines[i + 1] !== "") {
+            out.push("");
+        }
+    }
+    return out.join("\n");
+}
+function isImageOnlyMarkedLine(line) {
+    let rest = line.trim();
+    if (!rest.startsWith(imageStart))
+        return false;
+    while (rest.length > 0) {
+        if (!rest.startsWith(imageStart))
+            return false;
+        const end = rest.indexOf(imageEnd, imageStart.length);
+        if (end < 0)
+            return false;
+        rest = rest.slice(end + imageEnd.length).trim();
+    }
+    return true;
 }
 function isGyazoUrl(href) {
     try {
