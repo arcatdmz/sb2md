@@ -4,6 +4,8 @@ exports.sb2md = void 0;
 exports.convert = convert;
 const imageExtensions = /\.(avif|gif|jpe?g|png|svg|webp)(?:[?#].*)?$/i;
 const urlPattern = /^https?:\/\//i;
+const imageStart = "\uE000";
+const imageEnd = "\uE001";
 function convert(source, options = {}) {
     const lines = Array.isArray(source) ? source.slice() : source.replace(/\r\n?/g, "\n").split("\n");
     while (lines.length > 0 && lines[lines.length - 1] === "")
@@ -83,11 +85,14 @@ function convertLine(line, options) {
     const indentMarkdown = indent.length > 0 ? `${"  ".repeat(indent.length)}- ` : "";
     if (body.startsWith(">")) {
         const quote = body.slice(1).replace(/^[\t ]?/, "");
-        return `${indentMarkdown}>${quote ? ` ${convertInline(quote, options)}` : ""}`;
+        return formatInlineLine(`${indentMarkdown}> `, quote, options);
     }
-    return `${indentMarkdown}${convertInline(body, options)}`;
+    return formatInlineLine(indentMarkdown, body, options);
 }
 function convertInline(text, options) {
+    return stripImageMarkers(convertInlineMarked(text, options));
+}
+function convertInlineMarked(text, options) {
     let out = "";
     for (let i = 0; i < text.length;) {
         if (text[i] === "`") {
@@ -132,7 +137,7 @@ function readBracket(text, start, options) {
         if (end < 0)
             return null;
         return {
-            markdown: `**${convertInline(text.slice(start + 2, end), options)}**`,
+            markdown: `**${convertInlineMarked(text.slice(start + 2, end), options)}**`,
             next: end + 2,
         };
     }
@@ -145,7 +150,7 @@ function readBracket(text, start, options) {
     const styled = raw.match(/^([*_/$-]+)\s+([\s\S]*)$/);
     if (styled) {
         const [, marker, content] = styled;
-        const body = convertInline(content, options);
+        const body = convertInlineMarked(content, options);
         return { markdown: formatStyled(marker, body), next: end + 1 };
     }
     return { markdown: convertLink(raw, options), next: end + 1 };
@@ -237,12 +242,67 @@ function imageMarkdown(href, label = href) {
     if (isGyazoUrl(href)) {
         const thumb = `${href.replace(/\/$/, "")}/thumb/250`;
         const alt = label === href ? thumb : label;
-        return `[![${escapeAlt(alt)}](${escapeUrl(thumb)})](${escapeUrl(href)})`;
+        return markImage(`[![${escapeAlt(alt)}](${escapeUrl(thumb)})](${escapeUrl(href)})`);
     }
     if (imageExtensions.test(href)) {
-        return `![${escapeAlt(label)}](${escapeUrl(href)})`;
+        return markImage(`![${escapeAlt(label)}](${escapeUrl(href)})`);
     }
     return null;
+}
+function formatInlineLine(prefix, body, options) {
+    if (body === "" && prefix.trim() === ">")
+        return prefix.trimEnd();
+    const converted = convertInlineMarked(body, options);
+    if (!converted.includes(imageStart))
+        return `${prefix}${stripImageMarkers(converted)}`.trimEnd();
+    const lines = splitImageRuns(converted).map((segment) => `${prefix}${stripImageMarkers(segment)}`.trimEnd());
+    return lines.join("\n");
+}
+function splitImageRuns(marked) {
+    const parts = [];
+    let i = 0;
+    while (i < marked.length) {
+        const start = marked.indexOf(imageStart, i);
+        if (start < 0) {
+            if (i < marked.length)
+                parts.push({ type: "text", value: marked.slice(i) });
+            break;
+        }
+        if (start > i)
+            parts.push({ type: "text", value: marked.slice(i, start) });
+        const end = marked.indexOf(imageEnd, start + imageStart.length);
+        if (end < 0) {
+            parts.push({ type: "text", value: marked.slice(start) });
+            break;
+        }
+        parts.push({ type: "image", value: marked.slice(start + imageStart.length, end) });
+        i = end + imageEnd.length;
+    }
+    const lines = [];
+    let imageRun = "";
+    for (const part of parts) {
+        if (part.type === "image") {
+            imageRun += part.value;
+            continue;
+        }
+        const text = part.value.trim();
+        if (text) {
+            if (imageRun) {
+                lines.push(markImage(imageRun));
+                imageRun = "";
+            }
+            lines.push(text);
+        }
+    }
+    if (imageRun)
+        lines.push(markImage(imageRun));
+    return lines.length > 0 ? lines : [marked];
+}
+function markImage(markdown) {
+    return `${imageStart}${markdown}${imageEnd}`;
+}
+function stripImageMarkers(markdown) {
+    return markdown.replaceAll(imageStart, "").replaceAll(imageEnd, "");
 }
 function isGyazoUrl(href) {
     try {

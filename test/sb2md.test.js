@@ -52,6 +52,20 @@ test("gyazo and direct images", () => {
   );
 });
 
+test("image mixed with text is split into block-like lines", () => {
+  assert.equal(
+    sb2md("before [https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2] after [https://example.com/out]"),
+    "before\n[![https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2/thumb/250](https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2/thumb/250)](https://gyazo.com/b50a9bd54b16d3b1924043648ddca7d2)\nafter [https://example.com/out](https://example.com/out)"
+  );
+});
+
+test("multiple images on one Cosense line stay together", () => {
+  assert.equal(
+    sb2md("[https://example.com/a.png] [https://example.com/b.png]"),
+    "![https://example.com/a.png](https://example.com/a.png)![https://example.com/b.png](https://example.com/b.png)"
+  );
+});
+
 test("code block strips Cosense code indentation", () => {
   assert.equal(
     sb2md("code:hello.js\n function () {\n  console.log('hello')\n }"),

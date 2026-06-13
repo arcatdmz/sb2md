@@ -9,6 +9,8 @@ interface ParseResult {
 
 const imageExtensions = /\.(avif|gif|jpe?g|png|svg|webp)(?:[?#].*)?$/i;
 const urlPattern = /^https?:\/\//i;
+const imageStart = "\uE000";
+const imageEnd = "\uE001";
 
 export function convert(source: string | string[], options: ConvertOptions = {}): string {
   const lines = Array.isArray(source) ? source.slice() : source.replace(/\r\n?/g, "\n").split("\n");
@@ -91,13 +93,17 @@ function convertLine(line: string, options: ConvertOptions): string {
 
   if (body.startsWith(">")) {
     const quote = body.slice(1).replace(/^[\t ]?/, "");
-    return `${indentMarkdown}>${quote ? ` ${convertInline(quote, options)}` : ""}`;
+    return formatInlineLine(`${indentMarkdown}> `, quote, options);
   }
 
-  return `${indentMarkdown}${convertInline(body, options)}`;
+  return formatInlineLine(indentMarkdown, body, options);
 }
 
 function convertInline(text: string, options: ConvertOptions): string {
+  return stripImageMarkers(convertInlineMarked(text, options));
+}
+
+function convertInlineMarked(text: string, options: ConvertOptions): string {
   let out = "";
   for (let i = 0; i < text.length;) {
     if (text[i] === "`") {
@@ -141,7 +147,7 @@ function readBracket(text: string, start: number, options: ConvertOptions): Pars
     const end = text.indexOf("]]", start + 2);
     if (end < 0) return null;
     return {
-      markdown: `**${convertInline(text.slice(start + 2, end), options)}**`,
+      markdown: `**${convertInlineMarked(text.slice(start + 2, end), options)}**`,
       next: end + 2,
     };
   }
@@ -154,7 +160,7 @@ function readBracket(text: string, start: number, options: ConvertOptions): Pars
   const styled = raw.match(/^([*_/$-]+)\s+([\s\S]*)$/);
   if (styled) {
     const [, marker, content] = styled;
-    const body = convertInline(content, options);
+    const body = convertInlineMarked(content, options);
     return { markdown: formatStyled(marker, body), next: end + 1 };
   }
 
@@ -251,12 +257,68 @@ function imageMarkdown(href: string, label = href): string | null {
   if (isGyazoUrl(href)) {
     const thumb = `${href.replace(/\/$/, "")}/thumb/250`;
     const alt = label === href ? thumb : label;
-    return `[![${escapeAlt(alt)}](${escapeUrl(thumb)})](${escapeUrl(href)})`;
+    return markImage(`[![${escapeAlt(alt)}](${escapeUrl(thumb)})](${escapeUrl(href)})`);
   }
   if (imageExtensions.test(href)) {
-    return `![${escapeAlt(label)}](${escapeUrl(href)})`;
+    return markImage(`![${escapeAlt(label)}](${escapeUrl(href)})`);
   }
   return null;
+}
+
+function formatInlineLine(prefix: string, body: string, options: ConvertOptions): string {
+  if (body === "" && prefix.trim() === ">") return prefix.trimEnd();
+  const converted = convertInlineMarked(body, options);
+  if (!converted.includes(imageStart)) return `${prefix}${stripImageMarkers(converted)}`.trimEnd();
+
+  const lines = splitImageRuns(converted).map((segment) => `${prefix}${stripImageMarkers(segment)}`.trimEnd());
+  return lines.join("\n");
+}
+
+function splitImageRuns(marked: string): string[] {
+  const parts: { type: "image" | "text"; value: string }[] = [];
+  let i = 0;
+  while (i < marked.length) {
+    const start = marked.indexOf(imageStart, i);
+    if (start < 0) {
+      if (i < marked.length) parts.push({ type: "text", value: marked.slice(i) });
+      break;
+    }
+    if (start > i) parts.push({ type: "text", value: marked.slice(i, start) });
+    const end = marked.indexOf(imageEnd, start + imageStart.length);
+    if (end < 0) {
+      parts.push({ type: "text", value: marked.slice(start) });
+      break;
+    }
+    parts.push({ type: "image", value: marked.slice(start + imageStart.length, end) });
+    i = end + imageEnd.length;
+  }
+
+  const lines: string[] = [];
+  let imageRun = "";
+  for (const part of parts) {
+    if (part.type === "image") {
+      imageRun += part.value;
+      continue;
+    }
+    const text = part.value.trim();
+    if (text) {
+      if (imageRun) {
+        lines.push(markImage(imageRun));
+        imageRun = "";
+      }
+      lines.push(text);
+    }
+  }
+  if (imageRun) lines.push(markImage(imageRun));
+  return lines.length > 0 ? lines : [marked];
+}
+
+function markImage(markdown: string): string {
+  return `${imageStart}${markdown}${imageEnd}`;
+}
+
+function stripImageMarkers(markdown: string): string {
+  return markdown.replaceAll(imageStart, "").replaceAll(imageEnd, "");
 }
 
 function isGyazoUrl(href: string): boolean {
