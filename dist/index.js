@@ -1,0 +1,281 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.sb2md = void 0;
+exports.convert = convert;
+const imageExtensions = /\.(avif|gif|jpe?g|png|svg|webp)(?:[?#].*)?$/i;
+const urlPattern = /^https?:\/\//i;
+function convert(source, options = {}) {
+    const lines = Array.isArray(source) ? source.slice() : source.replace(/\r\n?/g, "\n").split("\n");
+    while (lines.length > 0 && lines[lines.length - 1] === "")
+        lines.pop();
+    const blocks = [];
+    for (let i = 0; i < lines.length;) {
+        const line = lines[i] ?? "";
+        if (line.startsWith("code:")) {
+            const result = parseCodeBlock(lines, i);
+            blocks.push(result.markdown);
+            i = result.next;
+            continue;
+        }
+        if (line.startsWith("table:")) {
+            const result = parseTableBlock(lines, i, options);
+            blocks.push(result.markdown);
+            i = result.next;
+            continue;
+        }
+        blocks.push(convertLine(line, options));
+        i += 1;
+    }
+    return blocks
+        .join("\n")
+        .replace(/^[\t ]+/gm, (indent) => indent.replace(/\t/g, "  "))
+        .replace(/[ \t]+$/gm, "");
+}
+exports.sb2md = convert;
+function parseCodeBlock(lines, start) {
+    const title = lines[start].slice("code:".length).trim();
+    const lang = codeLanguage(title);
+    const body = [];
+    let i = start + 1;
+    while (i < lines.length) {
+        const line = lines[i] ?? "";
+        if (line !== "" && !/^[\t ]/.test(line))
+            break;
+        body.push(line.replace(/^[\t ]/, ""));
+        i += 1;
+    }
+    while (body.length > 0 && body[body.length - 1] === "")
+        body.pop();
+    return {
+        markdown: `\`\`\`${lang}\n${body.join("\n")}\n\`\`\``,
+        next: i,
+    };
+}
+function parseTableBlock(lines, start, options) {
+    const rows = [];
+    let i = start + 1;
+    while (i < lines.length) {
+        const line = lines[i] ?? "";
+        if (line === "" || line.startsWith("code:") || line.startsWith("table:"))
+            break;
+        if (!line.includes("\t"))
+            break;
+        rows.push(line.replace(/^[\t ]/, "").split("\t").map((cell) => convertInline(cell.trim(), options)));
+        i += 1;
+    }
+    if (rows.length === 0) {
+        return { markdown: `<!-- ${escapeHtmlComment(lines[start])} -->`, next: start + 1 };
+    }
+    const width = Math.max(...rows.map((row) => row.length));
+    const normalized = rows.map((row) => Array.from({ length: width }, (_, idx) => escapeTableCell(row[idx] ?? "")));
+    const header = normalized[0];
+    const body = normalized.slice(1);
+    const markdown = [
+        tableRow(header),
+        tableRow(header.map(() => "---")),
+        ...body.map(tableRow),
+    ].join("\n");
+    return { markdown, next: i };
+}
+function convertLine(line, options) {
+    const indent = line.match(/^[\t ]*/)?.[0] ?? "";
+    const body = line.slice(indent.length);
+    const indentMarkdown = indent.length > 0 ? `${"  ".repeat(indent.length)}- ` : "";
+    if (body.startsWith(">")) {
+        const quote = body.slice(1).replace(/^[\t ]?/, "");
+        return `${indentMarkdown}>${quote ? ` ${convertInline(quote, options)}` : ""}`;
+    }
+    return `${indentMarkdown}${convertInline(body, options)}`;
+}
+function convertInline(text, options) {
+    let out = "";
+    for (let i = 0; i < text.length;) {
+        if (text[i] === "`") {
+            const result = readCodeSpan(text, i);
+            out += result.markdown;
+            i = result.next;
+            continue;
+        }
+        if (text[i] === "[") {
+            const result = readBracket(text, i, options);
+            if (result) {
+                out += result.markdown;
+                i = result.next;
+                continue;
+            }
+        }
+        if (text[i] === "#" && isHashLinkStart(text, i)) {
+            const result = readHashLink(text, i, options);
+            out += result.markdown;
+            i = result.next;
+            continue;
+        }
+        out += text[i];
+        i += 1;
+    }
+    return out;
+}
+function readCodeSpan(text, start) {
+    let tickCount = 1;
+    while (text[start + tickCount] === "`")
+        tickCount += 1;
+    const fence = "`".repeat(tickCount);
+    const end = text.indexOf(fence, start + tickCount);
+    if (end < 0)
+        return { markdown: text[start], next: start + 1 };
+    const code = text.slice(start + tickCount, end);
+    return { markdown: `${fence}${code}${fence}`, next: end + tickCount };
+}
+function readBracket(text, start, options) {
+    if (text.startsWith("[[", start)) {
+        const end = text.indexOf("]]", start + 2);
+        if (end < 0)
+            return null;
+        return {
+            markdown: `**${convertInline(text.slice(start + 2, end), options)}**`,
+            next: end + 2,
+        };
+    }
+    const end = findBracketEnd(text, start);
+    if (end < 0)
+        return null;
+    const raw = text.slice(start + 1, end);
+    if (raw === "")
+        return { markdown: "[]", next: end + 1 };
+    const styled = raw.match(/^([*_/$-]+)\s+([\s\S]*)$/);
+    if (styled) {
+        const [, marker, content] = styled;
+        const body = convertInline(content, options);
+        return { markdown: formatStyled(marker, body), next: end + 1 };
+    }
+    return { markdown: convertLink(raw, options), next: end + 1 };
+}
+function findBracketEnd(text, start) {
+    let depth = 0;
+    for (let i = start; i < text.length; i += 1) {
+        if (text[i] === "[")
+            depth += 1;
+        if (text[i] === "]") {
+            depth -= 1;
+            if (depth === 0)
+                return i;
+        }
+    }
+    return -1;
+}
+function formatStyled(marker, body) {
+    const kind = marker[0];
+    switch (kind) {
+        case "*":
+            return `**${body}**`;
+        case "-":
+            return `~~${body}~~`;
+        case "_":
+            return `<u>${body}</u>`;
+        case "/":
+            return `*${body}*`;
+        case "$":
+            return `$${body}$`;
+        default:
+            return `[${marker} ${body}]`;
+    }
+}
+function convertLink(raw, options) {
+    const segments = raw.trim().split(/\s+/);
+    const first = segments[0] ?? "";
+    const last = segments[segments.length - 1] ?? "";
+    if (segments.length > 1 && urlPattern.test(first)) {
+        const href = first;
+        const label = raw.trim().slice(first.length).trim();
+        return markdownLink(label || href, href);
+    }
+    if (segments.length > 1 && urlPattern.test(last)) {
+        const href = last;
+        const label = raw.trim().slice(0, -last.length).trim();
+        return markdownLink(label || href, href);
+    }
+    if (urlPattern.test(raw.trim())) {
+        const href = raw.trim();
+        return imageMarkdown(href) ?? markdownLink(href, href);
+    }
+    if (raw.startsWith("/")) {
+        const [, project = "", ...pageParts] = raw.split("/");
+        const page = pageParts.join("/");
+        const href = `https://scrapbox.io/${encodeURIComponent(project)}${page ? `/${encodePath(page)}` : ""}`;
+        return markdownLink(raw, href);
+    }
+    return markdownLink(raw, internalHref(raw, options));
+}
+function readHashLink(text, start, options) {
+    let end = start + 1;
+    while (end < text.length && !/[\s\])},.;:!?]/.test(text[end]))
+        end += 1;
+    const keyword = text.slice(start + 1, end);
+    return { markdown: markdownLink(`#${keyword}`, internalHref(keyword, options)), next: end };
+}
+function isHashLinkStart(text, index) {
+    const prev = index === 0 ? "" : text[index - 1];
+    const next = text[index + 1] ?? "";
+    if (!next || /\s/.test(next))
+        return false;
+    if (prev && !/\s|[([{]/.test(prev))
+        return false;
+    return true;
+}
+function internalHref(title, options) {
+    const encoded = encodePath(title);
+    const base = options.internalLinkBase?.replace(/\/$/, "");
+    return base ? `${base}/${encoded}` : `./${encoded}.md`;
+}
+function markdownLink(label, href) {
+    const image = imageMarkdown(href, label);
+    if (image)
+        return image;
+    return `[${escapeLinkLabel(label)}](${escapeUrl(href)})`;
+}
+function imageMarkdown(href, label = href) {
+    if (isGyazoUrl(href)) {
+        const thumb = `${href.replace(/\/$/, "")}/thumb/250`;
+        const alt = label === href ? thumb : label;
+        return `[![${escapeAlt(alt)}](${escapeUrl(thumb)})](${escapeUrl(href)})`;
+    }
+    if (imageExtensions.test(href)) {
+        return `![${escapeAlt(label)}](${escapeUrl(href)})`;
+    }
+    return null;
+}
+function isGyazoUrl(href) {
+    try {
+        const host = new URL(href).hostname.toLowerCase();
+        return host === "gyazo.com" || host.endsWith(".gyazo.com");
+    }
+    catch {
+        return false;
+    }
+}
+function codeLanguage(title) {
+    const name = title.trim();
+    const match = name.match(/\.([A-Za-z0-9_+-]+)$/);
+    return match?.[1] ?? name;
+}
+function encodePath(path) {
+    return path.split("/").map((part) => encodeURIComponent(part)).join("/");
+}
+function escapeLinkLabel(label) {
+    return label.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+}
+function escapeAlt(label) {
+    return label.replace(/]/g, "\\]");
+}
+function escapeUrl(href) {
+    return href.replace(/\)/g, "%29");
+}
+function tableRow(cells) {
+    return `| ${cells.join(" | ")} |`;
+}
+function escapeTableCell(cell) {
+    return cell.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+function escapeHtmlComment(text) {
+    return text.replace(/--/g, "==");
+}
